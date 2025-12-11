@@ -76,10 +76,6 @@ jobs:
         printf "%s" "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
         chmod 600 ~/.ssh/id_rsa
         echo -e "Host *\n  StrictHostKeyChecking no" > ~/.ssh/config
-
-    - name: Copy deploy files to server
-      run: |
-        rsync -avz -e "ssh -i /.ssh/id_rsa" deploy/ ${{ secrets.SSH_USER }}@${{ secrets.SERVER_HOST }}:/deploy/
     
     - name: Create deploy folder on server
       run: |
