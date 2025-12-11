@@ -9,4 +9,4 @@ Local dev:
 2. Build & run locally:
    docker compose up --build
 
-Deploy steps are implemented in GitHub Actions (build, push, SSH deploy).
+Deploy steps are implemented in GitHub Actions (build, push, SSH deploy).update
