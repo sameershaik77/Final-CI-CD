@@ -2,79 +2,88 @@ name: CI/CD Pipeline
 
 on:
   push:
-    branches: [ "main" ]
+    branches: ["main"]
 
 env:
   IMAGE: ${{ secrets.IMAGE }}
 
 jobs:
-
   build-and-push:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+    - name: Checkout repository
+      uses: actions/checkout@v4
 
-      - name: Login to DockerHub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
+    - name: Login to DockerHub
+      uses: docker/login-action@v3
+      with:
+        username: ${{ secrets.DOCKERHUB_USERNAME }}
+        password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
 
-      - name: Build and push Docker image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: ./Dockerfile
-          push: true
-          tags: ${{ env.IMAGE }}
+    - name: Build and push Docker image
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        file: ./Dockerfile
+        push: true
+        tags: ${{ env.IMAGE }}
 
-      - name: Create deploy folder
-        run: |
-          mkdir -p deploy
-          cp docker-compose.yml deploy/docker-compose.yml
+    # ---------------------------
+    # CREATE DEPLOY FOLDER LOCALLY
+    # ---------------------------
+    - name: Create deploy folder
+      run: |
+        mkdir -p deploy
+        cp docker-compose.yml deploy/docker-compose.yml
 
-          cat > deploy/deploy.sh <<'EOF'
-          #!/usr/bin/env bash
-          set -e
-          IMAGE="${IMAGE}"
+        cat > deploy/deploy.sh << 'EOF'
+        #!/usr/bin/env bash
+        set -e
 
-          cd ~/deploy
-          echo "Pulling image: $IMAGE"
-          docker pull "$IMAGE" || true
+        IMAGE="${IMAGE}"
 
-          echo "Stopping old containers..."
-          docker compose down || true
+        cd ~/deploy
 
-          echo "Starting new containers..."
-          docker compose up -d --remove-orphans
+        echo "Pulling latest image: $IMAGE"
+        docker pull "$IMAGE" || true
 
-          echo "Deployment complete."
-          EOF
+        echo "Stopping old containers..."
+        docker compose down || true
 
-          chmod +x deploy/deploy.sh
+        echo "Starting new containers..."
+        docker compose up -d --remove-orphans
 
-      - name: Install SSH and rsync
-        run: |
-          sudo apt-get update -y
-          sudo apt-get install -y rsync openssh-client
+        echo "Deployment completed!"
+        EOF
 
-      - name: Add SSH key
-        run: |
-          mkdir -p ~/.ssh
-          printf "%s\n" "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
-          chmod 600 ~/.ssh/id_rsa
-          echo -e "Host *\n\tStrictHostKeyChecking no\n" > ~/.ssh/config
+        chmod +x deploy/deploy.sh
 
-      - name: Copy files to server
-        run: |
-          rsync -avz -e "ssh -i ~/.ssh/id_rsa" deploy/ ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:~/deploy/
+    # ---------------------------
+    # SSH + COPY FILES
+    # ---------------------------
+    - name: Install SSH and rsync
+      run: |
+        sudo apt-get update -y
+        sudo apt-get install -y rsync openssh-client
 
-      - name: Run deploy script on server
-        run: |
-          ssh -i ~/.ssh/id_rsa ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} "bash ~/deploy/deploy.sh"
-    
+    - name: Add SSH Key
+      run: |
+        mkdir -p ~/.ssh
+        printf "%s" "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+        chmod 600 ~/.ssh/id_rsa
+        echo -e "Host *\n  StrictHostKeyChecking no" > ~/.ssh/config
+
+    - name: Copy deploy files to server
+      run: |
+        rsync -avz -e "ssh -i /.ssh/id_rsa" deploy/ ${{ secrets.SSH_USER }}@${{ secrets.SERVER_HOST }}:/deploy/
+
+    # ---------------------------
+    # SSH EXECUTE REMOTE DEPLOY
+    # ---------------------------
+    - name: Run deploy script on server
+      run: |
+        ssh -i ~/.ssh/id_rsa ${{ secrets.SSH_USER }}@${{ secrets.SERVER_HOST }} "bash ~/deploy/deploy.sh"
