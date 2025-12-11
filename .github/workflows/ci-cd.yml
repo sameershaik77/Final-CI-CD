@@ -81,6 +81,11 @@ jobs:
       run: |
         ssh -i ~/.ssh/id_rsa ${{ secrets.SSH_USER }}@${{ secrets.SERVER_HOST }} "mkdir -p ~/deploy"
 
+    - name: Copy deploy files to server
+      run: |
+        rsync -avz -e "ssh -i /.ssh/id_rsa" deploy/ ${{ secrets.SSH_USER }}@${{ secrets.SERVER_HOST }}:/deploy/
+   
+
     # ---------------------------
     # SSH EXECUTE REMOTE DEPLOY
     # ---------------------------
