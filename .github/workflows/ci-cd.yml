@@ -1,0 +1,66 @@
+name: CI/CD - Build & Deploy
+
+on:
+  push:
+    branches: [ main ]
+
+env:
+  IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/final-ci-cd:${{ github.sha }}
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Qemu
+        uses: docker/setup-qemu-action@v2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to DockerHub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          push: true
+          tags: ${{ env.IMAGE }}
+
+      - name: Create deploy script
+        run: |
+          cat > deploy.sh <<'EOF'
+          #!/bin/bash
+          set -e
+          cd /home/ubuntu/deploy || mkdir -p /home/ubuntu/deploy
+          cd /home/ubuntu/deploy
+          echo "Pulling image $IMAGE"
+          docker pull $IMAGE
+          docker compose down || true
+          # write docker-compose.yml (if you prefer, keep it on server)
+          # or run: docker compose up -d --force-recreate
+          docker compose up -d --remove-orphans
+          EOF
+          chmod +x deploy.sh
+
+      - name: Deploy to server via SSH
+        uses: appleboy/ssh-action@v0.1.7
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            export IMAGE=${{ env.IMAGE }}
+            mkdir -p /home/${{ secrets.SSH_USER }}/deploy
+            # copy repo files (docker-compose.yml is already present in repo) OR pull image directly:
+            docker pull $IMAGE
+            cd /home/${{ secrets.SSH_USER }}/deploy || exit 1
+            # ensure docker compose file exists; if you prefer, echo a docker-compose here
+            docker compose down || true
+            docker compose up -d --remove-orphans
