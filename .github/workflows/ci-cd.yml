@@ -80,6 +80,10 @@ jobs:
     - name: Copy deploy files to server
       run: |
         rsync -avz -e "ssh -i /.ssh/id_rsa" deploy/ ${{ secrets.SSH_USER }}@${{ secrets.SERVER_HOST }}:/deploy/
+    
+    - name: Create deploy folder on server
+      run: |
+        ssh -i ~/.ssh/id_rsa ${{ secrets.SSH_USER }}@${{ secrets.SERVER_HOST }} "mkdir -p ~/deploy"
 
     # ---------------------------
     # SSH EXECUTE REMOTE DEPLOY
