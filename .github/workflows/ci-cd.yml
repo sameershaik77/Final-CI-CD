@@ -65,30 +65,36 @@ jobs:
     # ---------------------------
     # SSH + COPY FILES
     # ---------------------------
+    # --- add this inside your job's steps (replace earlier SSH steps with this) ---
     - name: Install SSH and rsync
       run: |
         sudo apt-get update -y
         sudo apt-get install -y rsync openssh-client
 
-    - name: Add SSH Key
+    - name: Add SSH key (from repo secret)
       run: |
         mkdir -p ~/.ssh
-        printf "%s" "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+        printf '%s\n' "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
         chmod 600 ~/.ssh/id_rsa
-        echo -e "Host *\n  StrictHostKeyChecking no" > ~/.ssh/config
-    
-    - name: Create deploy folder on server
-      run: |
-        ssh -i ~/.ssh/id_rsa ${{ secrets.SSH_USER }}@${{ secrets.SERVER_HOST }} "mkdir -p ~/deploy"
+        # disable host key checking for CI
+        echo -e "Host *\n  StrictHostKeyChecking no\n  UserKnownHostsFile=/dev/null\n" > ~/.ssh/config
+        chmod 600 ~/.ssh/config
 
-    - name: Copy deploy files to server
+    - name: Copy files to server (rsync)
       run: |
-        rsync -avz -e "ssh -i /.ssh/id_rsa" deploy/ ${{ secrets.SSH_USER }}@${{ secrets.SERVER_HOST }}:/deploy/
-   
+        rsync -avz -e "ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no" ./ deploy@${{ secrets.SERVER_HOST }}:/home/${{ secrets.SSH_USER }}/deploy || true
+        # if you prefer ubuntu user:
+        # rsync -avz -e "ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no" ./ ubuntu@${{ secrets.SERVER_HOST }}:/home/ubuntu/deploy || true
 
-    # ---------------------------
-    # SSH EXECUTE REMOTE DEPLOY
-    # ---------------------------
-    - name: Run deploy script on server
+    - name: Run remote deploy script
       run: |
-        ssh -i ~/.ssh/id_rsa ${{ secrets.SSH_USER }}@${{ secrets.SERVER_HOST }} "bash ~/deploy/deploy.sh"
+        ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no ${{
+          secrets.SSH_USER
+        }}@${{ secrets.SERVER_HOST }} 'bash -lc "cd ~/deploy || exit 1; chmod +x ./deploy.sh || true; ./deploy.sh"'
+
+        # ---------------------------
+        # SSH EXECUTE REMOTE DEPLOY
+        # ---------------------------
+        - name: Run deploy script on server
+          run: |
+            ssh -i ~/.ssh/id_rsa ${{ secrets.SSH_USER }}@${{ secrets.SERVER_HOST }} "bash ~/deploy/deploy.sh"
