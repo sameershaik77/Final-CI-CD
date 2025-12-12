@@ -4,133 +4,137 @@ on:
   push:
     branches: ["main"]
 
-env:
-  IMAGE_NAME: sameershaik77/final-ci-cd
-  IMAGE_TAG: latest
-
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
 
     steps:
-    # Step 1: Checkout code
-    - name: Checkout repository
-      uses: actions/checkout@v4
+      # Step 1: Checkout code
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-    # Step 2: Setup Docker
-    - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v3
+      # Step 2: Setup Docker
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
-    # Step 3: Login to DockerHub
-    - name: Login to DockerHub
-      uses: docker/login-action@v3
-      with:
-        username: ${{ secrets.DOCKERHUB_USERNAME }}
-        password: ${{ secrets.DOCKERHUB_TOKEN }}
+      # Step 3: Login to DockerHub
+      - name: Login to DockerHub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-    # Step 4: Build and push Docker image
-    - name: Build and push Docker image
-      uses: docker/build-push-action@v5
-      with:
-        context: .
-        file: ./Dockerfile
-        push: true
-        tags: |
-          ${{ secrets.DOCKERHUB_USERNAME }}/final-ci-cd:latest
-          ${{ secrets.DOCKERHUB_USERNAME }}/final-ci-cd:${{ github.sha }}
+      # Step 4: Build and push Docker image
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/final-ci-cd:latest
 
-    # Step 5: Prepare deployment files
-    - name: Prepare deployment files
-      run: |
-        # Create deploy directory
-        mkdir -p deploy
-        
-        # Copy docker-compose
-        cp docker-compose.yml deploy/
-        
-        # Create .env file
-        cat > deploy/.env << EOF
-        IMAGE=${{ secrets.DOCKERHUB_USERNAME }}/final-ci-cd:latest
-        PORT=8080
-        DATABASE_URL=${{ secrets.DATABASE_URL }}
-        JWT_SECRET=${{ secrets.JWT_SECRET }}
-        DB_USER=postgres
-        DB_PASSWORD=postgres
-        DB_NAME=appdb
-        EOF
-        
-        # Create deploy.sh script
-        cat > deploy/deploy.sh << 'EOF'
-        #!/bin/bash
-        set -e
-        
-        echo "=== Starting deployment ==="
-        
-        # Load environment
-        export $(cat .env | xargs)
-        
-        echo "Pulling Docker image: $IMAGE"
-        docker pull $IMAGE || true
-        
-        echo "Stopping old containers..."
-        docker compose down || true
-        
-        echo "Starting new containers..."
-        docker compose up -d --remove-orphans
-        
-        echo "Cleaning up..."
-        docker system prune -f
-        
-        echo "=== Deployment complete ==="
-        echo "Application running on: http://$(curl -s ifconfig.me):8080"
-        EOF
-        
-        # Make script executable
-        chmod +x deploy/deploy.sh
-        
-        # List files to verify
-        echo "Deploy files created:"
-        ls -la deploy/
+      # Step 5: Create deployment files
+      - name: Create deployment files
+        run: |
+          # Create deploy directory
+          mkdir -p deploy
+          
+          # Create .env file
+          cat > deploy/.env << 'EOF'
+          IMAGE=${{ secrets.DOCKERHUB_USERNAME }}/final-ci-cd:latest
+          PORT=8080
+          DATABASE_URL=postgresql://postgres:postgres@db/appdb
+          JWT_SECRET=${{ secrets.JWT_SECRET }}
+          DB_USER=postgres
+          DB_PASSWORD=postgres
+          DB_NAME=appdb
+          EOF
+          
+          # Create docker-compose.yml
+          cat > deploy/docker-compose.yml << 'EOF'
+          services:
+            web:
+              image: ${IMAGE}
+              environment:
+                PORT: ${PORT}
+                DATABASE_URL: ${DATABASE_URL}
+                JWT_SECRET: ${JWT_SECRET}
+              ports:
+                - "8080:8080"
+              depends_on:
+                db:
+                  condition: service_healthy
+              restart: always
 
-    # Step 6: Setup SSH
-    - name: Setup SSH
-      run: |
-        mkdir -p ~/.ssh
-        echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
-        chmod 600 ~/.ssh/id_rsa
-        
-        # Add EC2 to known hosts
-        ssh-keyscan -H ${{ secrets.SERVER_HOST }} >> ~/.ssh/known_hosts 2>/dev/null
-        
-        # Test SSH connection
-        echo "Testing SSH connection..."
-        ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no ${{ secrets.SSH_USER }}@${{ secrets.SERVER_HOST }} "echo 'SSH connection successful'"
+            db:
+              image: postgres:15
+              environment:
+                POSTGRES_USER: ${DB_USER}
+                POSTGRES_PASSWORD: ${DB_PASSWORD}
+                POSTGRES_DB: ${DB_NAME}
+              volumes:
+                - postgres_data:/var/lib/postgresql/data
+              healthcheck:
+                test: ["CMD-SHELL", "pg_isready -U postgres"]
+                interval: 10s
+                timeout: 5s
+                retries: 5
+              restart: always
 
-    # Step 7: Copy files to server
-    - name: Copy files to server
-      run: |
-        echo "Copying files to EC2..."
-        scp -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no -r deploy/* ${{ secrets.SSH_USER }}@${{ secrets.SERVER_HOST }}:/home/${{ secrets.SSH_USER }}/deploy/
+          volumes:
+            postgres_data:
+          EOF
+          
+          # Create deploy.sh script
+          cat > deploy/deploy.sh << 'EOF'
+          #!/bin/bash
+          set -e
 
-    # Step 8: Deploy on server
-    - name: Deploy on server
-      run: |
-        echo "Deploying application on EC2..."
-        ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no ${{ secrets.SSH_USER }}@${{ secrets.SERVER_HOST }} << 'EOF'
-          cd /home/${{ secrets.SSH_USER }}/deploy
-          ls -la
-          chmod +x deploy.sh
-          ./deploy.sh
-        EOF
+          echo "=== Starting deployment ==="
 
-    # Step 9: Verify deployment
-    - name: Verify deployment
-      run: |
-        echo "Verifying deployment..."
-        ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no ${{ secrets.SSH_USER }}@${{ secrets.SERVER_HOST }} << 'EOF'
-          echo "Checking Docker containers:"
+          # Load environment from .env file
+          export $(grep -v '^#' .env | xargs)
+
+          echo "Environment variables loaded"
+          echo "Image: $IMAGE"
+
+          echo "Pulling Docker image..."
+          docker pull $IMAGE || echo "Image pull failed, will use available image"
+
+          echo "Stopping old containers..."
+          docker compose down || true
+
+          echo "Starting new containers..."
+          docker compose up -d --remove-orphans
+
+          echo "=== Deployment complete ==="
+          echo "Running containers:"
           docker ps
-          echo ""
-          echo "Checking application health:"
-          curl -s http://localhost:8080/health || echo "Health check failed"
-        EOF
+          EOF
+          
+          # Make script executable
+          chmod +x deploy/deploy.sh
+
+      # Step 6: Setup SSH
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H ${{ secrets.SERVER_HOST }} >> ~/.ssh/known_hosts 2>/dev/null
+
+      # Step 7: Copy files to EC2
+      - name: Copy files to EC2
+        run: |
+          echo "Copying files to server..."
+          scp -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no -r deploy/* ubuntu@${{ secrets.SERVER_HOST }}:/home/ubuntu/deploy/
+
+      # Step 8: Run deployment
+      - name: Run deployment on EC2
+        run: |
+          echo "Running deployment..."
+          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no ubuntu@${{ secrets.SERVER_HOST }} "
+            cd /home/ubuntu/deploy
+            ls -la
+            ./deploy.sh
+          "
