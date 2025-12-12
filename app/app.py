@@ -5,7 +5,7 @@ app = Flask(__name__)
 
 @app.route("/")
 def index():
-    return "Hello from Final CI-CD Flask app"
+    return "Test CI-CD Flask app deployment"
 
 @app.route("/health")
 def health():
