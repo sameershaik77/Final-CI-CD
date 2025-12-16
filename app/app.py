@@ -1,11 +1,12 @@
 from flask import Flask, jsonify
 import os
+from datetime import datetime
 
 app = Flask(__name__)
 
 @app.route("/")
 def index():
-    return "Test CI-CD Flask app deployment"
+    return "Hello from CI/CD Live Demo! Deployed at: " + datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 @app.route("/health")
 def health():
